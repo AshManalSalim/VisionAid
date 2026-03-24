@@ -1,0 +1,16 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+
+# Node
+mobile/node_modules/
+mobile/.expo/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Models (too large for git)
+backend/models/yolo/*.pt
