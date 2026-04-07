@@ -16,6 +16,7 @@ def image_to_base64(image):
     return base64.b64encode(buffer.getvalue()).decode('utf-8')
 def image_to_numpy(image):
     return np.array(image)
+
 def preprocess_for_ocr(image):
     img_np = np.array(image)
     gray= cv2.cvtColor(img_np,cv2.COLOR_RGB2GRAY)
@@ -23,6 +24,7 @@ def preprocess_for_ocr(image):
     enhanced = clahe.apply(gray)
     denoised = cv2.fastNlMeansDenoising(enhanced, h=10)
     return Image.fromarray(denoised)
+
 def preprocess_for_vision(image, max_size=1024):
     width, height =image.size
     if max(width, height) > max_size:
@@ -32,6 +34,7 @@ def preprocess_for_vision(image, max_size=1024):
     enhancer= ImageEnhance.Brightness(image)
     image= enhancer.enhance(1.1)
     return image
+
 def compress_image(b64_string, quality=60):
     image= base64_to_image(b64_string)
     image= preprocess_for_vision(image)

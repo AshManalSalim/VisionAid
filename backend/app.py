@@ -59,7 +59,7 @@ def call_steve(image_b64, prompt, max_tokens=300):
 def health():
     return jsonify({
         "status": "ok",
-        "ai": "gemini-1.5-flash",
+        "ai": "gemini-2.0-flash",
         "timestamp": time.time(),
         "cache_size": cache.size()
     })
