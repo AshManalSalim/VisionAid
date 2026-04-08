@@ -1,12 +1,14 @@
 import os
 import json
 import time
+import threading 
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sock import Sock
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+import google.generativeai as genai
+
 
 from utils.image import compress_image, base64_to_image, preprocess_for_ocr
 from utils.cache import cache
@@ -19,7 +21,7 @@ CORS(app)
 sock = Sock(app)
 
 # ── Configure Gemini ─────────────────────────────────────────────────────────
-client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
 
 _ocr_reader = None
 
