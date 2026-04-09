@@ -14,7 +14,7 @@ export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
   const [status, setStatus] = useState('VisionAid Ready');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [findObject, setFindObject] = useState('chair');
+  const [findObject] = useState('chair');
   const cameraRef = useRef(null);
 
   useEffect(() => {
@@ -40,14 +40,12 @@ export default function App() {
       setIsProcessing(true);
       speak('Processing...');
 
-      // Take photo
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.5,
         base64: true,
         skipProcessing: true
       });
 
-      // Send to server
       const response = await axios.post(`${SERVER_URL}/${action}`, {
         image: photo.base64,
         ...extra
@@ -55,7 +53,6 @@ export default function App() {
 
       const result = response.data.result;
 
-      // Warn if navigation detected danger
       if (action === 'navigate' && result.startsWith('WARNING')) {
         Vibration.vibrate([500, 200, 500]);
       }
@@ -76,38 +73,26 @@ export default function App() {
     }
   };
 
-  // ── Permission not granted yet ────────────────────────────
-  if (!permission) {
-    return <View style={styles.container} />;
-  }
+  if (!permission) return <View style={styles.container} />;
 
-  // ── Permission denied ─────────────────────────────────────
   if (!permission.granted) {
     return (
       <SafeAreaView style={styles.container}>
         <Text style={styles.permissionText}>
           Camera permission is required for VisionAid to work.
         </Text>
-        <TouchableOpacity
-          style={styles.permissionBtn}
-          onPress={requestPermission}
-        >
+        <TouchableOpacity style={styles.permissionBtn} onPress={requestPermission}>
           <Text style={styles.btnText}>Grant Camera Permission</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
-  // ── Main app ──────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
 
       {/* Camera */}
-      <CameraView
-        style={styles.camera}
-        facing="back"
-        ref={cameraRef}
-      />
+      <CameraView style={styles.camera} facing="back" ref={cameraRef} />
 
       {/* Status bar */}
       <View style={styles.statusBar}>
@@ -116,7 +101,7 @@ export default function App() {
         </Text>
       </View>
 
-      {/* Buttons */}
+      {/* Controls */}
       <View style={styles.controls}>
 
         {/* Row 1 */}
@@ -161,17 +146,17 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* Stop button */}
+        {/* Stop — big and visible */}
         <TouchableOpacity
-          style={[styles.btn, styles.btnRed, styles.btnWide]}
+          style={styles.stopBtn}
           onPress={() => {
             Speech.stop();
             setStatus('Stopped.');
             setIsProcessing(false);
           }}
         >
-          <Text style={styles.btnIcon}>🛑</Text>
-          <Text style={styles.btnText}>Stop</Text>
+          <Text style={styles.stopIcon}>🛑</Text>
+          <Text style={styles.stopText}>STOP SPEAKING</Text>
         </TouchableOpacity>
 
       </View>
@@ -180,13 +165,8 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000'
-  },
-  camera: {
-    flex: 1
-  },
+  container: { flex: 1, backgroundColor: '#000' },
+  camera: { flex: 1 },
   statusBar: {
     backgroundColor: 'rgba(0,0,0,0.85)',
     padding: 12,
@@ -194,10 +174,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   statusText: {
-    color: 'white',
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20
+    color: 'white', fontSize: 14,
+    textAlign: 'center', lineHeight: 20
   },
   controls: {
     backgroundColor: '#111',
@@ -210,45 +188,36 @@ const styles = StyleSheet.create({
     marginBottom: 10
   },
   btn: {
-    flex: 1,
-    marginHorizontal: 5,
-    padding: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center'
+    flex: 1, marginHorizontal: 5,
+    padding: 14, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center'
   },
-  btnWide: {
-    flex: 1,
-    marginHorizontal: 5
-  },
-  btnDisabled: {
-    opacity: 0.4
-  },
+  btnDisabled: { opacity: 0.4 },
   btnBlue:   { backgroundColor: '#2196F3' },
   btnGreen:  { backgroundColor: '#4CAF50' },
   btnOrange: { backgroundColor: '#FF9800' },
   btnPurple: { backgroundColor: '#9C27B0' },
-  btnRed:    { backgroundColor: '#F44336' },
-  btnIcon: {
-    fontSize: 24,
-    marginBottom: 4
+  btnIcon: { fontSize: 24, marginBottom: 4 },
+  btnText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
+  stopBtn: {
+    backgroundColor: '#F44336',
+    padding: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginHorizontal: 5,
+    marginTop: 5,
+    flexDirection: 'row',
+    justifyContent: 'center'
   },
-  btnText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 13
-  },
+  stopIcon: { fontSize: 28, marginRight: 10 },
+  stopText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
   permissionText: {
-    color: 'white',
-    textAlign: 'center',
-    fontSize: 16,
-    margin: 30
+    color: 'white', textAlign: 'center',
+    fontSize: 16, margin: 30
   },
   permissionBtn: {
     backgroundColor: '#2196F3',
-    padding: 15,
-    borderRadius: 10,
-    margin: 20,
-    alignItems: 'center'
+    padding: 15, borderRadius: 10,
+    margin: 20, alignItems: 'center'
   }
 });
