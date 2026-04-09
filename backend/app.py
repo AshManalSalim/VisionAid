@@ -1,14 +1,16 @@
 import os
 import json
 import time
-import threading 
-
+import base64
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sock import Sock
 from dotenv import load_dotenv
-import google.generativeai as genai
+from groq import Groq
+import pytesseract
+from PIL import Image
 
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 from utils.image import compress_image, base64_to_image, preprocess_for_ocr
 from utils.cache import cache
@@ -20,53 +22,44 @@ app = Flask(__name__)
 CORS(app)
 sock = Sock(app)
 
-# ── Configure Gemini ─────────────────────────────────────────────────────────
-genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-
-_ocr_reader = None
-
-def get_ocr():
-    global _ocr_reader
-    if _ocr_reader is None:
-        import easyocr
-        _ocr_reader = easyocr.Reader(['en'], gpu=False)
-    return _ocr_reader
-
-
-
 def call_steve(image_b64, prompt, max_tokens=300):
-    """Send image + prompt to Gemini and return response text"""
-    import base64
-    
-    image_data = base64.b64decode(image_b64)
-    
-    response = client.models.generate_content(
-        model='gemini-2.0-flash',
-        contents=[
-            types.Part.from_bytes(
-                data=image_data,
-                mime_type='image/jpeg'
-            ),
-            prompt
+    client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+    response = client.chat.completions.create(
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_b64}"
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt
+                    }
+                ]
+            }
         ],
-        config=types.GenerateContentConfig(
-            max_output_tokens=max_tokens,
-            temperature=0.3
-        )
+        max_tokens=max_tokens,
+        temperature=0.3
     )
-    
-    return response.text
+    return response.choices[0].message.content
 
+# ── Health ────────────────────────────────────────────────────
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({
         "status": "ok",
-        "ai": "gemini-2.0-flash",
+        "ai": "groq-llama4-scout",
+        "ocr": "tesseract",
         "timestamp": time.time(),
         "cache_size": cache.size()
     })
 
-
+# ── Describe ──────────────────────────────────────────────────
 @app.route('/describe', methods=['POST'])
 def describe():
     data = request.json
@@ -89,7 +82,7 @@ def describe():
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
-
+# ── Find ──────────────────────────────────────────────────────
 @app.route('/find', methods=['POST'])
 def find():
     data = request.json
@@ -104,15 +97,14 @@ def find():
     prompt = (
         f"Is there a {object_name} visible in this image? "
         "If yes, say exactly where: left side, right side, center, "
-        "top, bottom, near, or far. "
-        "If no, say it is not visible. "
+        "near, or far. If no, say it is not visible. "
         "Maximum 1 sentence. Be direct."
     )
     result = call_steve(image_b64, prompt, max_tokens=100)
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
-
+# ── Read ──────────────────────────────────────────────────────
 @app.route('/read', methods=['POST'])
 def read_text():
     data = request.json
@@ -125,18 +117,17 @@ def read_text():
 
     image = base64_to_image(image_b64)
     processed = preprocess_for_ocr(image)
-    import numpy as np
-    results = get_ocr().readtext(np.array(processed))
 
-    if results:
-        text = ' '.join([r[1] for r in results if r[2] > 0.3])
-        result = text if text.strip() else "No readable text found"
-    else:
-        result = "No text detected in the image"
+    text = pytesseract.image_to_string(
+        processed,
+        config='--psm 6 --oem 3'
+    ).strip()
 
+    result = text if text else "No text detected"
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
+# ── Navigate ──────────────────────────────────────────────────
 @app.route('/navigate', methods=['POST'])
 def navigate():
     data = request.json
@@ -149,17 +140,16 @@ def navigate():
 
     prompt = (
         "You are a navigation assistant for a blind person. "
-        "Analyze the path ahead and answer: "
-        "1. Is the path clear to walk? "
-        "2. Are there any obstacles? If yes, where exactly and how close? "
-        "3. What surface is ahead (floor, stairs, road)? "
-        "Be very concise, max 2 sentences. Start with CLEAR or WARNING."
+        "Is the path ahead clear to walk? "
+        "Are there any obstacles? If yes, where and how close? "
+        "What surface is ahead? "
+        "Be concise, max 2 sentences. Start with CLEAR or WARNING."
     )
     result = call_steve(image_b64, prompt, max_tokens=150)
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
-
+# ── Command router ────────────────────────────────────────────
 @app.route('/command', methods=['POST'])
 def command():
     data = request.json
@@ -189,11 +179,10 @@ def command():
         request.json['object'] = intent.get('object', 'object')
         return find()
 
-
+# ── WebSocket ─────────────────────────────────────────────────
 @sock.route('/ws')
 def websocket(ws):
-    print(" Client connected via WebSocket")
-
+    print("📱 Client connected via WebSocket")
     while True:
         try:
             raw = ws.receive()
@@ -208,10 +197,7 @@ def websocket(ws):
                 ws.send(json.dumps({"error": "No image provided"}))
                 continue
 
-            ws.send(json.dumps({
-                "status": "processing",
-                "action": action
-            }))
+            ws.send(json.dumps({"status": "processing", "action": action}))
 
             image_b64 = compress_image(image_b64)
             cache_key = cache.make_key(image_b64, action)
@@ -227,9 +213,10 @@ def websocket(ws):
             elif action == 'read':
                 image = base64_to_image(image_b64)
                 processed = preprocess_for_ocr(image)
-                import numpy as np
-                results = get_ocr().readtext(np.array(processed))
-                result = ' '.join([r[1] for r in results if r[2] > 0.3]) or "No text found"
+                result = pytesseract.image_to_string(
+                    processed,
+                    config='--psm 6 --oem 3'
+                ).strip() or "No text found"
             elif action == 'find':
                 obj = data.get('object', 'object')
                 result = call_steve(image_b64,
@@ -243,7 +230,6 @@ def websocket(ws):
                 result = "Unknown action"
 
             cache.set(cache_key, result)
-
             ws.send(json.dumps({
                 "result": result,
                 "action": action,
@@ -257,13 +243,14 @@ def websocket(ws):
             except:
                 break
 
-    print(" Client disconnected")
+    print("📱 Client disconnected")
 
-
+# ── Run ───────────────────────────────────────────────────────
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('DEBUG', 'True') == 'True'
-    print(f"VisionAid backend running on port {port}")
-    print(f"AI: Gemini 1.5 Flash ")
-    print(f"WebSocket available at ws://localhost:{port}/ws")
+    print(f" VisionAid backend running on port {port}")
+    print(f" AI: Groq Llama4 Scout (Free)")
+    print(f" OCR: Tesseract (Offline)")
+    print(f" WebSocket available at ws://localhost:{port}/ws")
     app.run(host='0.0.0.0', port=port, debug=debug)
