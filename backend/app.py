@@ -2,6 +2,7 @@ import os
 import json
 import time
 import base64
+import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sock import Sock
@@ -22,6 +23,17 @@ app = Flask(__name__)
 CORS(app)
 sock = Sock(app)
 
+# ── Lazy loaded models ────────────────────────────────────────
+_yolo_model = None
+
+def get_yolo():
+    global _yolo_model
+    if _yolo_model is None:
+        from ultralytics import YOLO
+        _yolo_model = YOLO('yolo11x.pt')
+    return _yolo_model
+
+# ── Groq AI ───────────────────────────────────────────────────
 def call_steve(image_b64, prompt, max_tokens=300):
     client = Groq(api_key=os.getenv('GROQ_API_KEY'))
     response = client.chat.completions.create(
@@ -48,6 +60,51 @@ def call_steve(image_b64, prompt, max_tokens=300):
     )
     return response.choices[0].message.content
 
+# ── YOLO helper ───────────────────────────────────────────────
+def run_yolo(img_np):
+    model = get_yolo()
+    results = model(img_np, verbose=False)
+    detections = []
+
+    for result in results:
+        for box in result.boxes[:10]:
+            cls_id = int(box.cls[0])
+            confidence = float(box.conf[0])
+            label = result.names[cls_id]
+
+            if confidence < 0.3:
+                continue
+
+            # Position (left/center/right)
+            x_center = float(box.xywh[0][0])
+            img_width = img_np.shape[1]
+            if x_center < img_width / 3:
+                position = "to your left"
+            elif x_center > 2 * img_width / 3:
+                position = "to your right"
+            else:
+                position = "in front of you"
+
+            # Distance based on box size ratio
+            box_area = float(box.xywh[0][2] * box.xywh[0][3])
+            img_area = img_np.shape[0] * img_np.shape[1]
+            ratio = box_area / img_area
+            if ratio > 0.25:
+                distance = "very close"
+            elif ratio > 0.08:
+                distance = "nearby"
+            elif ratio > 0.03:
+                distance = "a few meters away"
+            else:
+                distance = "far away"
+
+            detections.append(f"{label} {position} {distance}")
+
+    if detections:
+        count = len(detections)
+        return f"I can see {count} object{'s' if count > 1 else ''}: " + ", ".join(detections[:10])
+    return "No objects detected in the scene"
+
 # ── Health ────────────────────────────────────────────────────
 @app.route('/health', methods=['GET'])
 def health():
@@ -55,6 +112,7 @@ def health():
         "status": "ok",
         "ai": "groq-llama4-scout",
         "ocr": "tesseract",
+        "detection": "yolo11x",
         "timestamp": time.time(),
         "cache_size": cache.size()
     })
@@ -120,7 +178,7 @@ def read_text():
 
     text = pytesseract.image_to_string(
         processed,
-        config='--psm 6 --oem 3'
+        config='--psm 6 --oem 3 -l eng --dpi 300'
     ).strip()
 
     result = text if text else "No text detected"
@@ -146,6 +204,24 @@ def navigate():
         "Be concise, max 2 sentences. Start with CLEAR or WARNING."
     )
     result = call_steve(image_b64, prompt, max_tokens=150)
+    cache.set(cache_key, result)
+    return jsonify({"result": result, "cached": False})
+
+# ── Detect (YOLO11x) ──────────────────────────────────────────
+@app.route('/detect', methods=['POST'])
+def detect():
+    data = request.json
+    image_b64 = compress_image(data['image'])
+    cache_key = cache.make_key(image_b64, 'detect')
+
+    cached = cache.get(cache_key)
+    if cached:
+        return jsonify({"result": cached, "cached": True})
+
+    image = base64_to_image(image_b64)
+    img_np = np.array(image)
+    result = run_yolo(img_np)
+
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
@@ -226,6 +302,10 @@ def websocket(ws):
                 result = call_steve(image_b64,
                     "Is the path ahead clear to walk? Any obstacles? "
                     "Start with CLEAR or WARNING. Max 2 sentences.")
+            elif action == 'detect':
+                image = base64_to_image(image_b64)
+                img_np = np.array(image)
+                result = run_yolo(img_np)
             else:
                 result = "Unknown action"
 
@@ -249,8 +329,9 @@ def websocket(ws):
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('DEBUG', 'True') == 'True'
-    print(f" VisionAid backend running on port {port}")
-    print(f" AI: Groq Llama4 Scout (Free)")
+    print(f"VisionAid backend running on port {port}")
+    print(f"AI: Groq Llama4 Scout (Free)")
     print(f" OCR: Tesseract (Offline)")
-    print(f" WebSocket available at ws://localhost:{port}/ws")
+    print(f" Detection: YOLO11x (Offline)")
+    print(f"WebSocket available at ws://localhost:{port}/ws")
     app.run(host='0.0.0.0', port=port, debug=debug)

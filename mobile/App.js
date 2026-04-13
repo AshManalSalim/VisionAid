@@ -15,10 +15,17 @@ export default function App() {
   const [status, setStatus] = useState('VisionAid Ready');
   const [isProcessing, setIsProcessing] = useState(false);
   const [findObject] = useState('chair');
+  const [autoDetect, setAutoDetect] = useState(false);
   const cameraRef = useRef(null);
+  const autoDetectRef = useRef(null);
 
   useEffect(() => {
     speak('VisionAid ready. Tap a button to begin.');
+    return () => {
+      if (autoDetectRef.current) {
+        clearInterval(autoDetectRef.current);
+      }
+    };
   }, []);
 
   // ── Speak helper ──────────────────────────────────────────
@@ -49,7 +56,7 @@ export default function App() {
       const response = await axios.post(`${SERVER_URL}/${action}`, {
         image: photo.base64,
         ...extra
-      }, { timeout: 15000 });
+      }, { timeout: 30000 });
 
       const result = response.data.result;
 
@@ -71,6 +78,55 @@ export default function App() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // ── Auto obstacle detection ───────────────────────────────
+  const startAutoDetect = () => {
+    if (autoDetectRef.current) return;
+    setAutoDetect(true);
+    speak('Auto detection started.');
+
+    setTimeout(() => {
+      autoDetectRef.current = setInterval(async () => {
+        if (!cameraRef.current) return;
+
+        try {
+          const photo = await cameraRef.current.takePictureAsync({
+            quality: 0.3,
+            base64: true,
+            skipProcessing: true
+          });
+
+          const response = await axios.post(`${SERVER_URL}/detect`, {
+            image: photo.base64
+          }, { timeout: 15000 });
+
+          const result = response.data.result;
+
+          if (result && result !== 'No objects detected in the scene') {
+            if (result.includes('very close')) {
+              Vibration.vibrate([300, 100, 300, 100, 300]);
+              speak('Warning! ' + result);
+            } else {
+              speak(result);
+            }
+          }
+
+        } catch (error) {
+          // Silent fail for auto detection
+          console.error('Auto detect error:', error);
+        }
+      }, 5000); // every 5 seconds
+    }, 2000); // wait 2 seconds before starting
+  };
+
+  const stopAutoDetect = () => {
+    if (autoDetectRef.current) {
+      clearInterval(autoDetectRef.current);
+      autoDetectRef.current = null;
+    }
+    setAutoDetect(false);
+    speak('Auto detection stopped.');
   };
 
   if (!permission) return <View style={styles.container} />;
@@ -97,7 +153,8 @@ export default function App() {
       {/* Status bar */}
       <View style={styles.statusBar}>
         <Text style={styles.statusText} numberOfLines={3}>
-          {isProcessing ? '⏳ Processing...' : status}
+          {isProcessing ? '⏳ Processing...' :
+           autoDetect ? '🔄 ' + status : status}
         </Text>
       </View>
 
@@ -146,11 +203,32 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
+        {/* Row 3 */}
+        <View style={styles.row}>
+          <TouchableOpacity
+            style={[styles.btn, styles.btnTeal, isProcessing && styles.btnDisabled]}
+            onPress={() => captureAndSend('detect')}
+            disabled={isProcessing}
+          >
+            <Text style={styles.btnIcon}>🎯</Text>
+            <Text style={styles.btnText}>Detect Once</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.btn, autoDetect ? styles.btnRed : styles.btnDarkTeal]}
+            onPress={autoDetect ? stopAutoDetect : startAutoDetect}
+          >
+            <Text style={styles.btnIcon}>{autoDetect ? '⏹️' : '🔄'}</Text>
+            <Text style={styles.btnText}>{autoDetect ? 'Stop Auto' : 'Auto Detect'}</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Stop — big and visible */}
         <TouchableOpacity
           style={styles.stopBtn}
           onPress={() => {
             Speech.stop();
+            stopAutoDetect();
             setStatus('Stopped.');
             setIsProcessing(false);
           }}
@@ -193,10 +271,13 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center'
   },
   btnDisabled: { opacity: 0.4 },
-  btnBlue:   { backgroundColor: '#2196F3' },
-  btnGreen:  { backgroundColor: '#4CAF50' },
-  btnOrange: { backgroundColor: '#FF9800' },
-  btnPurple: { backgroundColor: '#9C27B0' },
+  btnBlue:     { backgroundColor: '#2196F3' },
+  btnGreen:    { backgroundColor: '#4CAF50' },
+  btnOrange:   { backgroundColor: '#FF9800' },
+  btnPurple:   { backgroundColor: '#9C27B0' },
+  btnTeal:     { backgroundColor: '#009688' },
+  btnDarkTeal: { backgroundColor: '#00695C' },
+  btnRed:      { backgroundColor: '#F44336' },
   btnIcon: { fontSize: 24, marginBottom: 4 },
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
   stopBtn: {
