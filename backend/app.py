@@ -8,6 +8,7 @@ from flask_cors import CORS
 from flask_sock import Sock
 from dotenv import load_dotenv
 from groq import Groq
+
 import pytesseract
 from PIL import Image
 
@@ -23,7 +24,7 @@ app = Flask(__name__)
 CORS(app)
 sock = Sock(app)
 
-# ── Lazy loaded models ────────────────────────────────────────
+
 _yolo_model = None
 
 def get_yolo():
@@ -33,7 +34,7 @@ def get_yolo():
         _yolo_model = YOLO('yolo11x.pt')
     return _yolo_model
 
-# ── Groq AI ───────────────────────────────────────────────────
+
 def call_steve(image_b64, prompt, max_tokens=300):
     client = Groq(api_key=os.getenv('GROQ_API_KEY'))
     response = client.chat.completions.create(
@@ -60,7 +61,6 @@ def call_steve(image_b64, prompt, max_tokens=300):
     )
     return response.choices[0].message.content
 
-# ── YOLO helper ───────────────────────────────────────────────
 def run_yolo(img_np):
     model = get_yolo()
     results = model(img_np, verbose=False)
@@ -105,7 +105,6 @@ def run_yolo(img_np):
         return f"I can see {count} object{'s' if count > 1 else ''}: " + ", ".join(detections[:10])
     return "No objects detected in the scene"
 
-# ── Health ────────────────────────────────────────────────────
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({
@@ -117,7 +116,6 @@ def health():
         "cache_size": cache.size()
     })
 
-# ── Describe ──────────────────────────────────────────────────
 @app.route('/describe', methods=['POST'])
 def describe():
     data = request.json
@@ -140,7 +138,7 @@ def describe():
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
-# ── Find ──────────────────────────────────────────────────────
+
 @app.route('/find', methods=['POST'])
 def find():
     data = request.json
@@ -162,7 +160,44 @@ def find():
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
-# ── Read ──────────────────────────────────────────────────────
+
+"""@app.route('/read', methods=['POST'])
+def read_text():
+    data = request.json
+    image_b64 = compress_image(data['image'])
+    cache_key = cache.make_key(image_b64, 'read')
+
+    cached = cache.get(cache_key)
+    if cached:
+        return jsonify({"result": cached, "cached": True})
+
+    # Try Tesseract first
+    image = base64_to_image(image_b64)
+    processed = preprocess_for_ocr(image)
+    text = pytesseract.image_to_string(
+        processed,
+        config='--psm 6 --oem 3 -l eng --dpi 300'
+    ).strip()
+
+    # Clean up
+    text = ' '.join(text.split())
+    words = [w for w in text.split() if len(w) > 1]
+
+    if len(words) >= 2:
+        # Tesseract worked
+        result = text
+    else:
+        # Fall back to Groq
+        prompt = (
+            "You are an OCR assistant for a blind person. "
+            "Read ALL text visible in this image exactly as written. "
+            "Output ONLY the text. If no text say 'No text found'."
+        )
+        result = call_steve(image_b64, prompt, max_tokens=200)
+
+    cache.set(cache_key, result)
+    return jsonify({"result": result, "cached": False})"""
+
 @app.route('/read', methods=['POST'])
 def read_text():
     data = request.json
@@ -173,19 +208,19 @@ def read_text():
     if cached:
         return jsonify({"result": cached, "cached": True})
 
-    image = base64_to_image(image_b64)
-    processed = preprocess_for_ocr(image)
+    prompt = (
+        "You are an OCR assistant for a blind person. "
+        "Carefully read ALL text visible in this image. "
+        "Include signs, labels, books, screens, anything with text. "
+        "Output ONLY the text you see, word by word. "
+        "If no text is visible say 'No text found'."
+    )
+    result = call_steve(image_b64, prompt, max_tokens=200)
 
-    text = pytesseract.image_to_string(
-        processed,
-        config='--psm 6 --oem 3 -l eng --dpi 300'
-    ).strip()
-
-    result = text if text else "No text detected"
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
-# ── Navigate ──────────────────────────────────────────────────
+
 @app.route('/navigate', methods=['POST'])
 def navigate():
     data = request.json
@@ -207,7 +242,7 @@ def navigate():
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
-# ── Detect (YOLO11x) ──────────────────────────────────────────
+
 @app.route('/detect', methods=['POST'])
 def detect():
     data = request.json
@@ -225,7 +260,7 @@ def detect():
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
 
-# ── Command router ────────────────────────────────────────────
+
 @app.route('/command', methods=['POST'])
 def command():
     data = request.json
@@ -255,7 +290,7 @@ def command():
         request.json['object'] = intent.get('object', 'object')
         return find()
 
-# ── WebSocket ─────────────────────────────────────────────────
+
 @sock.route('/ws')
 def websocket(ws):
     print("📱 Client connected via WebSocket")
@@ -323,9 +358,8 @@ def websocket(ws):
             except:
                 break
 
-    print("📱 Client disconnected")
+    print(" Client disconnected")
 
-# ── Run ───────────────────────────────────────────────────────
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('DEBUG', 'True') == 'True'
