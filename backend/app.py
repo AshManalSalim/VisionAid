@@ -116,7 +116,7 @@ def health():
         "cache_size": cache.size()
     })
 
-@app.route('/describe', methods=['POST'])
+"""@app.route('/describe', methods=['POST'])
 def describe():
     data = request.json
     image_b64 = compress_image(data['image'])
@@ -134,6 +134,79 @@ def describe():
         "'nearby' for 1-3 meters, 'ahead' for further. "
         "Use simple clear language."
     )
+    result = call_steve(image_b64, prompt)
+    cache.set(cache_key, result)
+    return jsonify({"result": result, "cached": False})"""
+
+@app.route('/describe', methods=['POST'])
+def describe():
+    data = request.json
+    image_b64 = compress_image(data['image'])
+    cache_key = cache.make_key(image_b64, 'describe')
+
+    cached = cache.get(cache_key)
+    if cached:
+        return jsonify({"result": cached, "cached": True})
+
+    # Step 1 — Run YOLO first (fast, offline)
+    image = base64_to_image(image_b64)
+    img_np = np.array(image)
+    model = get_yolo()
+    yolo_results = model(img_np, verbose=False)
+
+    detections = []
+    for result in yolo_results:
+        for box in result.boxes[:10]:
+            cls_id = int(box.cls[0])
+            confidence = float(box.conf[0])
+            label = result.names[cls_id]
+
+            if confidence < 0.3:
+                continue
+
+            x_center = float(box.xywh[0][0])
+            img_width = img_np.shape[1]
+            if x_center < img_width / 3:
+                position = "to your left"
+            elif x_center > 2 * img_width / 3:
+                position = "to your right"
+            else:
+                position = "in front of you"
+
+            box_area = float(box.xywh[0][2] * box.xywh[0][3])
+            img_area = img_np.shape[0] * img_np.shape[1]
+            ratio = box_area / img_area
+            if ratio > 0.25:
+                distance = "very close"
+            elif ratio > 0.08:
+                distance = "nearby"
+            elif ratio > 0.03:
+                distance = "a few meters away"
+            else:
+                distance = "far away"
+
+            detections.append(f"{label} {position} {distance}")
+
+    # Step 2 — Send YOLO results + image to Groq
+    if detections:
+        yolo_context = ", ".join(detections[:10])
+        prompt = (
+            f"You are an assistant for a blind person. "
+            f"YOLO object detection found: {yolo_context}. "
+            f"Using this information and the image, give a clear natural "
+            f"2 sentence description of what's ahead. "
+            f"Mention the most important objects and any dangers. "
+            f"Be specific about distances and directions. "
+            f"Use simple clear language."
+        )
+    else:
+        prompt = (
+            "You are an assistant for a blind person. "
+            "In 2 short sentences describe what is directly ahead "
+            "and warn about any obstacles. "
+            "Be specific about distances. Use simple clear language."
+        )
+
     result = call_steve(image_b64, prompt)
     cache.set(cache_key, result)
     return jsonify({"result": result, "cached": False})
