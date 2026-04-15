@@ -34,6 +34,15 @@ def get_yolo():
         _yolo_model = YOLO('yolo11x.pt')
     return _yolo_model
 
+def has_internet():
+    """Check if internet is available"""
+    import socket
+    try:
+        socket.setdefaulttimeout(3)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
+        return True
+    except Exception:
+        return False
 
 def call_steve(image_b64, prompt, max_tokens=300):
     client = Groq(api_key=os.getenv('GROQ_API_KEY'))

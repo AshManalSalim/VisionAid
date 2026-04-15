@@ -18,15 +18,17 @@ export default function App() {
   const [autoDetect, setAutoDetect] = useState(false);
   const cameraRef = useRef(null);
   const autoDetectRef = useRef(null);
+  const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
-    speak('VisionAid ready. Tap a button to begin.');
-    return () => {
-      if (autoDetectRef.current) {
-        clearInterval(autoDetectRef.current);
-      }
-    };
-  }, []);
+  speak('VisionAid ready. Tap a button to begin.');
+  checkConnection();
+  const interval = setInterval(checkConnection, 30000);
+  return () => {
+    clearInterval(interval);
+    if (autoDetectRef.current) clearInterval(autoDetectRef.current);
+  };
+}, []);
 
   // ── Speak helper ──────────────────────────────────────────
   const speak = (text) => {
@@ -241,6 +243,15 @@ export default function App() {
     </SafeAreaView>
   );
 }
+
+const checkConnection = async () => {
+  try {
+    const response = await axios.get(`${SERVER_URL}/status`, { timeout: 3000 });
+    setIsOnline(response.data.online);
+  } catch {
+    setIsOnline(false);
+  }
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },

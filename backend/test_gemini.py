@@ -76,7 +76,7 @@ def test_cache():
 
 if __name__ == '__main__':
     print("=" * 50)
-    print("🚀 VisionAid - Gemini Integration Tests")
+    print(" VisionAid - Gemini Integration Tests")
     print("=" * 50)
     test_gemini_text()
     test_gemini_image()
