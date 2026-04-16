@@ -141,6 +141,21 @@ def status():
         }
     })
 
+"""@app.route('/status', methods=['GET'])
+def status():
+    online = has_internet()
+    return jsonify({
+        "online": online,
+        "mode": "full" if online else "offline",
+        "features": {
+            "describe": True,
+            "find": online,
+            "read": online,
+            "navigate": online,
+            "detect": True
+        }
+    })"""
+
 
 """@app.route('/describe', methods=['POST'])
 def describe():
