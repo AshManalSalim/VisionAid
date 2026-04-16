@@ -2,6 +2,7 @@ import os
 import json
 import time
 import base64
+import socket
 import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -125,6 +126,22 @@ def health():
         "cache_size": cache.size()
     })
 
+@app.route('/status', methods=['GET'])
+def status():
+    online = has_internet()
+    return jsonify({
+        "online": online,
+        "mode": "full" if online else "offline",
+        "features": {
+            "describe": True,
+            "find": online,
+            "read": online,
+            "navigate": online,
+            "detect": True
+        }
+    })
+
+
 """@app.route('/describe', methods=['POST'])
 def describe():
     data = request.json
@@ -156,7 +173,14 @@ def describe():
     cached = cache.get(cache_key)
     if cached:
         return jsonify({"result": cached, "cached": True})
-
+    # If offline use YOLO only
+    if not has_internet():
+        image = base64_to_image(image_b64)
+        img_np = np.array(image)
+        result = run_yolo(img_np)
+        cache.set(cache_key, result)
+        return jsonify({"result": result, "cached": False, "offline": True})
+    
     # Step 1 — Run YOLO first (fast, offline)
     image = base64_to_image(image_b64)
     img_np = np.array(image)
@@ -441,13 +465,14 @@ def websocket(ws):
                 break
 
     print(" Client disconnected")
-
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('DEBUG', 'True') == 'True'
+    online = has_internet()
     print(f"VisionAid backend running on port {port}")
     print(f"AI: Groq Llama4 Scout (Free)")
     print(f" OCR: Tesseract (Offline)")
     print(f" Detection: YOLO11x (Offline)")
+    print(f" Internet: {'✅ Online' if online else '❌ Offline — YOLO only'}")
     print(f"WebSocket available at ws://localhost:{port}/ws")
     app.run(host='0.0.0.0', port=port, debug=debug)
