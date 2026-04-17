@@ -1,7 +1,13 @@
 import hashlib
 import time
 
+
 class SimpleCache:
+    """
+    In-memory cache that stores AI responses to avoid reprocessing same images.
+    Entries expire after ttl seconds.
+    """
+
     def __init__(self, ttl=10):
         self._cache = {}
         self.ttl = ttl
@@ -33,4 +39,6 @@ class SimpleCache:
     def size(self):
         return len(self._cache)
 
+
+# Global cache instance
 cache = SimpleCache(ttl=10)
