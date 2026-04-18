@@ -6,9 +6,16 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Speech from 'expo-speech';
 import axios from 'axios';
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent
+} from 'expo-speech-recognition';
 
-// 🔴 CHANGE THIS to your PC's IP address
+// 🔴 CHANGE THIS to your server URL
 const SERVER_URL = 'http://10.126.151.35:5000';
+
+// Wake words that activate the app
+const WAKE_WORDS = ['hey vision', 'hi vision', 'okay vision', 'vision'];
 
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -17,19 +24,65 @@ export default function App() {
   const [findObject] = useState('chair');
   const [autoDetect, setAutoDetect] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [isListening, setIsListening] = useState(false);
+  const [isWakeMode, setIsWakeMode] = useState(false);
   const cameraRef = useRef(null);
   const autoDetectRef = useRef(null);
+  const wakeLoopRef = useRef(null);
 
   useEffect(() => {
-    speak('VisionAid ready. Tap a button to begin.');
+    speak('VisionAid ready. Tap a button or say Hey Vision to begin.');
     checkConnection();
     const interval = setInterval(checkConnection, 30000);
     return () => {
       clearInterval(interval);
       if (autoDetectRef.current) clearInterval(autoDetectRef.current);
+      stopWakeWord();
     };
   }, []);
 
+  // ── Speech recognition events ─────────────────────────────
+  useSpeechRecognitionEvent('start', () => setIsListening(true));
+  useSpeechRecognitionEvent('end', () => {
+    setIsListening(false);
+    // If in wake mode, restart listening automatically
+    if (wakeLoopRef.current) {
+      setTimeout(() => startListeningOnce(), 500);
+    }
+  });
+  useSpeechRecognitionEvent('result', (event) => {
+    const text = (event.results[0]?.transcript || '').toLowerCase().trim();
+    if (!text) return;
+
+    if (wakeLoopRef.current) {
+      // In wake word mode — check for wake word
+      const woken = WAKE_WORDS.some(w => text.includes(w));
+      if (woken) {
+        Vibration.vibrate(200);
+        speak('Yes? Say your command.');
+        wakeLoopRef.current = false; // pause wake loop
+        setTimeout(() => startListeningOnce(), 1000);
+      }
+    } else {
+      // In command mode
+      handleVoiceCommand(text);
+      // Resume wake word mode after command
+      setTimeout(() => {
+        if (isWakeMode) {
+          wakeLoopRef.current = true;
+          startListeningOnce();
+        }
+      }, 3000);
+    }
+  });
+  useSpeechRecognitionEvent('error', () => {
+    setIsListening(false);
+    if (wakeLoopRef.current) {
+      setTimeout(() => startListeningOnce(), 1000);
+    }
+  });
+
+  // ── Check internet connection ─────────────────────────────
   const checkConnection = async () => {
     try {
       const response = await axios.get(`${SERVER_URL}/status`, { timeout: 3000 });
@@ -39,12 +92,14 @@ export default function App() {
     }
   };
 
+  // ── Speak helper ──────────────────────────────────────────
   const speak = (text) => {
     Speech.stop();
     Speech.speak(text, { rate: 0.9, pitch: 1.0, language: 'en-US' });
     setStatus(text);
   };
 
+  // ── Capture and send to server ────────────────────────────
   const captureAndSend = async (action, extra = {}) => {
     if (!cameraRef.current || isProcessing) return;
     try {
@@ -75,6 +130,7 @@ export default function App() {
     }
   };
 
+  // ── Auto obstacle detection ───────────────────────────────
   const startAutoDetect = () => {
     if (autoDetectRef.current) return;
     setAutoDetect(true);
@@ -114,6 +170,93 @@ export default function App() {
     speak('Auto detection stopped.');
   };
 
+  // ── Voice command handler ─────────────────────────────────
+  const handleVoiceCommand = (text) => {
+    setStatus(`Heard: "${text}"`);
+
+    if (text.includes('stop') || text.includes('quiet')) {
+      Speech.stop();
+      stopAutoDetect();
+      setStatus('Stopped.');
+      return;
+    }
+    if (text.includes('describe') || text.includes('what') ||
+        text.includes('see') || text.includes('around')) {
+      captureAndSend('describe');
+    } else if (text.includes('read') || text.includes('text')) {
+      captureAndSend('read');
+    } else if (text.includes('navigate') || text.includes('path') ||
+               text.includes('walk') || text.includes('safe')) {
+      captureAndSend('navigate');
+    } else if (text.includes('detect') || text.includes('objects')) {
+      captureAndSend('detect');
+    } else if (text.includes('find') || text.includes('where is')) {
+      const match = text.match(/find (.+)|where is (.+)/);
+      const object = match ? (match[1] || match[2]).trim() : 'object';
+      captureAndSend('find', { object });
+    } else if (text.includes('auto')) {
+      autoDetect ? stopAutoDetect() : startAutoDetect();
+    } else {
+      speak('Command not understood. Say describe, read, navigate, find, or detect.');
+    }
+  };
+
+  // ── Single listen session ─────────────────────────────────
+  const startListeningOnce = async () => {
+    try {
+      await ExpoSpeechRecognitionModule.start({
+        lang: 'en-US',
+        interimResults: false,
+        continuous: false,
+      });
+    } catch (error) {
+      console.error('Listen error:', error);
+    }
+  };
+
+  // ── Manual voice button ───────────────────────────────────
+  const startManualListen = async () => {
+    if (isListening) {
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    try {
+      const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!granted) {
+        speak('Microphone permission denied.');
+        return;
+      }
+      wakeLoopRef.current = false; // command mode directly
+      await startListeningOnce();
+    } catch (error) {
+      speak('Could not start voice recognition.');
+    }
+  };
+
+  // ── Wake word mode ────────────────────────────────────────
+  const startWakeWord = async () => {
+    try {
+      const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!granted) {
+        speak('Microphone permission denied.');
+        return;
+      }
+      setIsWakeMode(true);
+      wakeLoopRef.current = true;
+      speak('Wake word mode on. Say Hey Vision to activate.');
+      await startListeningOnce();
+    } catch (error) {
+      speak('Could not start wake word mode.');
+    }
+  };
+
+  const stopWakeWord = () => {
+    wakeLoopRef.current = false;
+    setIsWakeMode(false);
+    try { ExpoSpeechRecognitionModule.stop(); } catch {}
+    speak('Wake word mode off.');
+  };
+
   if (!permission) return <View style={styles.container} />;
 
   if (!permission.granted) {
@@ -130,16 +273,24 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <CameraView style={styles.camera} facing="back" ref={cameraRef} />
+
+      {/* Status bar */}
       <View style={styles.statusBar}>
         <Text style={styles.connectionText}>
           {isOnline ? '🟢 Online' : '🔴 Offline'}
+          {isWakeMode ? '  |  👂 Listening for "Hey Vision"' : ''}
         </Text>
         <Text style={styles.statusText} numberOfLines={3}>
           {isProcessing ? '⏳ Processing...' :
-           autoDetect ? '🔄 ' + status : status}
+           isListening  ? '🎤 Listening...' :
+           autoDetect   ? '🔄 ' + status : status}
         </Text>
       </View>
+
+      {/* Controls */}
       <View style={styles.controls}>
+
+        {/* Row 1 */}
         <View style={styles.row}>
           <TouchableOpacity
             style={[styles.btn, styles.btnBlue, isProcessing && styles.btnDisabled]}
@@ -158,6 +309,8 @@ export default function App() {
             <Text style={styles.btnText}>Read Text</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Row 2 */}
         <View style={styles.row}>
           <TouchableOpacity
             style={[styles.btn, styles.btnOrange, isProcessing && styles.btnDisabled]}
@@ -176,6 +329,8 @@ export default function App() {
             <Text style={styles.btnText}>Find {findObject}</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Row 3 */}
         <View style={styles.row}>
           <TouchableOpacity
             style={[styles.btn, styles.btnTeal, isProcessing && styles.btnDisabled]}
@@ -193,11 +348,32 @@ export default function App() {
             <Text style={styles.btnText}>{autoDetect ? 'Stop Auto' : 'Auto Detect'}</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Row 4 — Voice */}
+        <View style={styles.row}>
+          <TouchableOpacity
+            style={[styles.btn, isListening ? styles.btnRed : styles.btnVoice]}
+            onPress={startManualListen}
+          >
+            <Text style={styles.btnIcon}>{isListening ? '⏹️' : '🎤'}</Text>
+            <Text style={styles.btnText}>{isListening ? 'Stop' : 'Voice Command'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.btn, isWakeMode ? styles.btnRed : styles.btnWake]}
+            onPress={isWakeMode ? stopWakeWord : startWakeWord}
+          >
+            <Text style={styles.btnIcon}>{isWakeMode ? '🔇' : '👂'}</Text>
+            <Text style={styles.btnText}>{isWakeMode ? 'Stop Wake' : 'Hey Vision'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Stop */}
         <TouchableOpacity
           style={styles.stopBtn}
           onPress={() => {
             Speech.stop();
             stopAutoDetect();
+            stopWakeWord();
             setStatus('Stopped.');
             setIsProcessing(false);
           }}
@@ -205,6 +381,7 @@ export default function App() {
           <Text style={styles.stopIcon}>🛑</Text>
           <Text style={styles.stopText}>STOP SPEAKING</Text>
         </TouchableOpacity>
+
       </View>
     </SafeAreaView>
   );
@@ -233,6 +410,8 @@ const styles = StyleSheet.create({
   btnTeal:     { backgroundColor: '#009688' },
   btnDarkTeal: { backgroundColor: '#00695C' },
   btnRed:      { backgroundColor: '#F44336' },
+  btnVoice:    { backgroundColor: '#1565C0' },
+  btnWake:     { backgroundColor: '#6A1B9A' },
   btnIcon: { fontSize: 24, marginBottom: 4 },
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
   stopBtn: {

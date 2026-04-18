@@ -36,13 +36,20 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "VisionAid needs camera access to help visually impaired users."
-        }
-      ]
-    ],
+  [
+    "expo-camera",
+    {
+      "cameraPermission": "VisionAid needs camera access to help visually impaired users."
+    }
+  ],
+  [
+    "expo-speech-recognition",
+    {
+      "microphonePermission": "VisionAid needs microphone for voice commands.",
+      "speechRecognitionPermission": "VisionAid needs speech recognition for voice commands."
+    }
+  ]
+],
     "extra": {
       "eas": {
         "projectId": "7d5f7486-9bc8-41af-9544-a67c8fdf83e8"
