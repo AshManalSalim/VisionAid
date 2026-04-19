@@ -19,6 +19,7 @@ export default function App() {
   const [autoDetect, setAutoDetect] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
+  const [showButtons, setShowButtons] = useState(true);
   const cameraRef = useRef(null);
   const autoDetectRef = useRef(null);
   const recordingRef = useRef(null);
@@ -158,6 +159,12 @@ export default function App() {
       captureAndSend('find', { object });
     } else if (cmd.includes('auto')) {
       autoDetect ? stopAutoDetect() : startAutoDetect();
+    } else if (cmd.includes('hide') || cmd.includes('clean')) {
+      setShowButtons(false);
+      speak('Buttons hidden.');
+    } else if (cmd.includes('show') || cmd.includes('buttons')) {
+      setShowButtons(true);
+      speak('Buttons shown.');
     } else {
       speak('Command not understood. Say describe, read, navigate, find, or detect.');
     }
@@ -192,7 +199,6 @@ export default function App() {
       const uri = recordingRef.current.getURI();
       recordingRef.current = null;
 
-      // Read audio file as base64
       const response = await fetch(uri);
       const blob = await response.blob();
       const reader = new FileReader();
@@ -257,66 +263,95 @@ export default function App() {
       {/* Controls */}
       <View style={styles.controls}>
 
-        {/* Row 1 */}
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[styles.btn, styles.btnBlue, isProcessing && styles.btnDisabled]}
-            onPress={() => captureAndSend('describe')}
-            disabled={isProcessing}
-          >
-            <Text style={styles.btnIcon}>👁️</Text>
-            <Text style={styles.btnText}>Describe</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btn, styles.btnGreen, isProcessing && styles.btnDisabled]}
-            onPress={() => captureAndSend('read')}
-            disabled={isProcessing}
-          >
-            <Text style={styles.btnIcon}>📖</Text>
-            <Text style={styles.btnText}>Read Text</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Toggle button — always visible */}
+        <TouchableOpacity
+          style={styles.toggleBtn}
+          onPress={() => setShowButtons(!showButtons)}
+        >
+          <Text style={styles.toggleText}>
+            {showButtons ? '🙈 Hide Buttons' : '👁️ Show Buttons'}
+          </Text>
+        </TouchableOpacity>
 
-        {/* Row 2 */}
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[styles.btn, styles.btnOrange, isProcessing && styles.btnDisabled]}
-            onPress={() => captureAndSend('navigate')}
-            disabled={isProcessing}
-          >
-            <Text style={styles.btnIcon}>🧭</Text>
-            <Text style={styles.btnText}>Navigate</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btn, styles.btnPurple, isProcessing && styles.btnDisabled]}
-            onPress={() => captureAndSend('find', { object: findObject })}
-            disabled={isProcessing}
-          >
-            <Text style={styles.btnIcon}>🔍</Text>
-            <Text style={styles.btnText}>Find {findObject}</Text>
-          </TouchableOpacity>
-        </View>
+        {/* All action buttons — hidden/shown */}
+        {showButtons && (
+          <>
+            {/* Row 1 */}
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnBlue, isProcessing && styles.btnDisabled]}
+                onPress={() => captureAndSend('describe')}
+                disabled={isProcessing}
+              >
+                <Text style={styles.btnIcon}>👁️</Text>
+                <Text style={styles.btnText}>Describe</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnGreen, isProcessing && styles.btnDisabled]}
+                onPress={() => captureAndSend('read')}
+                disabled={isProcessing}
+              >
+                <Text style={styles.btnIcon}>📖</Text>
+                <Text style={styles.btnText}>Read Text</Text>
+              </TouchableOpacity>
+            </View>
 
-        {/* Row 3 */}
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[styles.btn, styles.btnTeal, isProcessing && styles.btnDisabled]}
-            onPress={() => captureAndSend('detect')}
-            disabled={isProcessing}
-          >
-            <Text style={styles.btnIcon}>🎯</Text>
-            <Text style={styles.btnText}>Detect Once</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btn, autoDetect ? styles.btnRed : styles.btnDarkTeal]}
-            onPress={autoDetect ? stopAutoDetect : startAutoDetect}
-          >
-            <Text style={styles.btnIcon}>{autoDetect ? '⏹️' : '🔄'}</Text>
-            <Text style={styles.btnText}>{autoDetect ? 'Stop Auto' : 'Auto Detect'}</Text>
-          </TouchableOpacity>
-        </View>
+            {/* Row 2 */}
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnOrange, isProcessing && styles.btnDisabled]}
+                onPress={() => captureAndSend('navigate')}
+                disabled={isProcessing}
+              >
+                <Text style={styles.btnIcon}>🧭</Text>
+                <Text style={styles.btnText}>Navigate</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnPurple, isProcessing && styles.btnDisabled]}
+                onPress={() => captureAndSend('find', { object: findObject })}
+                disabled={isProcessing}
+              >
+                <Text style={styles.btnIcon}>🔍</Text>
+                <Text style={styles.btnText}>Find {findObject}</Text>
+              </TouchableOpacity>
+            </View>
 
-        {/* Voice button — hold to record */}
+            {/* Row 3 */}
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnTeal, isProcessing && styles.btnDisabled]}
+                onPress={() => captureAndSend('detect')}
+                disabled={isProcessing}
+              >
+                <Text style={styles.btnIcon}>🎯</Text>
+                <Text style={styles.btnText}>Detect Once</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btn, autoDetect ? styles.btnRed : styles.btnDarkTeal]}
+                onPress={autoDetect ? stopAutoDetect : startAutoDetect}
+              >
+                <Text style={styles.btnIcon}>{autoDetect ? '⏹️' : '🔄'}</Text>
+                <Text style={styles.btnText}>{autoDetect ? 'Stop Auto' : 'Auto Detect'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Stop button */}
+            <TouchableOpacity
+              style={styles.stopBtn}
+              onPress={() => {
+                Speech.stop();
+                stopAutoDetect();
+                setStatus('Stopped.');
+                setIsProcessing(false);
+              }}
+            >
+              <Text style={styles.stopIcon}>🛑</Text>
+              <Text style={styles.stopText}>STOP SPEAKING</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* Voice button — always visible */}
         <TouchableOpacity
           style={[styles.voiceBtn, isRecording && styles.voiceBtnActive]}
           onPressIn={startRecording}
@@ -327,20 +362,6 @@ export default function App() {
           <Text style={styles.voiceText}>
             {isRecording ? 'Release to Send' : 'Hold to Speak'}
           </Text>
-        </TouchableOpacity>
-
-        {/* Stop button */}
-        <TouchableOpacity
-          style={styles.stopBtn}
-          onPress={() => {
-            Speech.stop();
-            stopAutoDetect();
-            setStatus('Stopped.');
-            setIsProcessing(false);
-          }}
-        >
-          <Text style={styles.stopIcon}>🛑</Text>
-          <Text style={styles.stopText}>STOP SPEAKING</Text>
         </TouchableOpacity>
 
       </View>
@@ -373,11 +394,18 @@ const styles = StyleSheet.create({
   btnRed:      { backgroundColor: '#F44336' },
   btnIcon: { fontSize: 24, marginBottom: 4 },
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
+  toggleBtn: {
+    backgroundColor: '#37474F',
+    padding: 10, borderRadius: 12,
+    alignItems: 'center', marginHorizontal: 5,
+    marginBottom: 10
+  },
+  toggleText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
   voiceBtn: {
     backgroundColor: '#1565C0',
     padding: 18, borderRadius: 12,
     alignItems: 'center', marginHorizontal: 5,
-    marginBottom: 10, flexDirection: 'row',
+    marginTop: 10, flexDirection: 'row',
     justifyContent: 'center'
   },
   voiceBtnActive: { backgroundColor: '#B71C1C' },
@@ -385,7 +413,7 @@ const styles = StyleSheet.create({
   voiceText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   stopBtn: {
     backgroundColor: '#F44336', padding: 18, borderRadius: 12,
-    alignItems: 'center', marginHorizontal: 5, marginTop: 5,
+    alignItems: 'center', marginHorizontal: 5, marginTop: 10,
     flexDirection: 'row', justifyContent: 'center'
   },
   stopIcon: { fontSize: 28, marginRight: 10 },
