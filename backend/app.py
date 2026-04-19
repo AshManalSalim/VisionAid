@@ -191,6 +191,35 @@ def detect():
     return jsonify({"result": result, "cached": False})
 
 
+@app.route('/transcribe', methods=['POST'])
+def transcribe():
+    import tempfile
+    data = request.json
+    audio_b64 = data.get('audio', '')
+    
+    if not audio_b64:
+        return jsonify({"error": "No audio provided"}), 400
+
+    # Decode base64 audio to temp file
+    audio_bytes = base64.b64decode(audio_b64)
+    with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as f:
+        f.write(audio_bytes)
+        temp_path = f.name
+
+    try:
+        client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+        with open(temp_path, 'rb') as audio_file:
+            transcription = client.audio.transcriptions.create(
+                model="whisper-large-v3",
+                file=audio_file,
+                language="en"
+            )
+        return jsonify({"text": transcription.text})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        os.unlink(temp_path)
+
 # ── Command router ────────────────────────────────────────────
 @app.route('/command', methods=['POST'])
 def command():

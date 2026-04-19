@@ -5,17 +5,11 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Speech from 'expo-speech';
+import { Audio } from 'expo-av';
 import axios from 'axios';
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent
-} from 'expo-speech-recognition';
 
-// 🔴 CHANGE THIS to your server URL
+// 🔴 CHANGE THIS to your PC's IP address
 const SERVER_URL = 'http://10.126.151.35:5000';
-
-// Wake words that activate the app
-const WAKE_WORDS = ['hey vision', 'hi vision', 'okay vision', 'vision'];
 
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -24,63 +18,30 @@ export default function App() {
   const [findObject] = useState('chair');
   const [autoDetect, setAutoDetect] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
-  const [isListening, setIsListening] = useState(false);
-  const [isWakeMode, setIsWakeMode] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const cameraRef = useRef(null);
   const autoDetectRef = useRef(null);
-  const wakeLoopRef = useRef(null);
+  const recordingRef = useRef(null);
 
   useEffect(() => {
-    speak('VisionAid ready. Tap a button or say Hey Vision to begin.');
+    speak('VisionAid ready. Tap a button or hold the microphone to speak.');
     checkConnection();
+    requestMicPermission();
     const interval = setInterval(checkConnection, 30000);
     return () => {
       clearInterval(interval);
       if (autoDetectRef.current) clearInterval(autoDetectRef.current);
-      stopWakeWord();
     };
   }, []);
 
-  // ── Speech recognition events ─────────────────────────────
-  useSpeechRecognitionEvent('start', () => setIsListening(true));
-  useSpeechRecognitionEvent('end', () => {
-    setIsListening(false);
-    // If in wake mode, restart listening automatically
-    if (wakeLoopRef.current) {
-      setTimeout(() => startListeningOnce(), 500);
-    }
-  });
-  useSpeechRecognitionEvent('result', (event) => {
-    const text = (event.results[0]?.transcript || '').toLowerCase().trim();
-    if (!text) return;
-
-    if (wakeLoopRef.current) {
-      // In wake word mode — check for wake word
-      const woken = WAKE_WORDS.some(w => text.includes(w));
-      if (woken) {
-        Vibration.vibrate(200);
-        speak('Yes? Say your command.');
-        wakeLoopRef.current = false; // pause wake loop
-        setTimeout(() => startListeningOnce(), 1000);
-      }
-    } else {
-      // In command mode
-      handleVoiceCommand(text);
-      // Resume wake word mode after command
-      setTimeout(() => {
-        if (isWakeMode) {
-          wakeLoopRef.current = true;
-          startListeningOnce();
-        }
-      }, 3000);
-    }
-  });
-  useSpeechRecognitionEvent('error', () => {
-    setIsListening(false);
-    if (wakeLoopRef.current) {
-      setTimeout(() => startListeningOnce(), 1000);
-    }
-  });
+  // ── Request microphone permission ─────────────────────────
+  const requestMicPermission = async () => {
+    await Audio.requestPermissionsAsync();
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+    });
+  };
 
   // ── Check internet connection ─────────────────────────────
   const checkConnection = async () => {
@@ -172,89 +133,96 @@ export default function App() {
 
   // ── Voice command handler ─────────────────────────────────
   const handleVoiceCommand = (text) => {
+    const cmd = text.toLowerCase().trim();
     setStatus(`Heard: "${text}"`);
 
-    if (text.includes('stop') || text.includes('quiet')) {
+    if (cmd.includes('stop') || cmd.includes('quiet')) {
       Speech.stop();
       stopAutoDetect();
       setStatus('Stopped.');
       return;
     }
-    if (text.includes('describe') || text.includes('what') ||
-        text.includes('see') || text.includes('around')) {
+    if (cmd.includes('describe') || cmd.includes('what') ||
+        cmd.includes('see') || cmd.includes('around')) {
       captureAndSend('describe');
-    } else if (text.includes('read') || text.includes('text')) {
+    } else if (cmd.includes('read') || cmd.includes('text')) {
       captureAndSend('read');
-    } else if (text.includes('navigate') || text.includes('path') ||
-               text.includes('walk') || text.includes('safe')) {
+    } else if (cmd.includes('navigate') || cmd.includes('path') ||
+               cmd.includes('walk') || cmd.includes('safe')) {
       captureAndSend('navigate');
-    } else if (text.includes('detect') || text.includes('objects')) {
+    } else if (cmd.includes('detect') || cmd.includes('objects')) {
       captureAndSend('detect');
-    } else if (text.includes('find') || text.includes('where is')) {
-      const match = text.match(/find (.+)|where is (.+)/);
+    } else if (cmd.includes('find') || cmd.includes('where is')) {
+      const match = cmd.match(/find (.+)|where is (.+)/);
       const object = match ? (match[1] || match[2]).trim() : 'object';
       captureAndSend('find', { object });
-    } else if (text.includes('auto')) {
+    } else if (cmd.includes('auto')) {
       autoDetect ? stopAutoDetect() : startAutoDetect();
     } else {
       speak('Command not understood. Say describe, read, navigate, find, or detect.');
     }
   };
 
-  // ── Single listen session ─────────────────────────────────
-  const startListeningOnce = async () => {
+  // ── Start recording ───────────────────────────────────────
+  const startRecording = async () => {
+    if (isRecording || isProcessing) return;
     try {
-      await ExpoSpeechRecognitionModule.start({
-        lang: 'en-US',
-        interimResults: false,
-        continuous: false,
-      });
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      await recording.startAsync();
+      recordingRef.current = recording;
+      setIsRecording(true);
+      setStatus('🎤 Listening... release to send');
+      Vibration.vibrate(100);
     } catch (error) {
-      console.error('Listen error:', error);
+      console.error('Recording error:', error);
+      speak('Could not start recording. Check microphone permission.');
     }
   };
 
-  // ── Manual voice button ───────────────────────────────────
-  const startManualListen = async () => {
-    if (isListening) {
-      ExpoSpeechRecognitionModule.stop();
-      return;
-    }
+  // ── Stop recording and transcribe ─────────────────────────
+  const stopRecording = async () => {
+    if (!recordingRef.current || !isRecording) return;
     try {
-      const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (!granted) {
-        speak('Microphone permission denied.');
-        return;
-      }
-      wakeLoopRef.current = false; // command mode directly
-      await startListeningOnce();
-    } catch (error) {
-      speak('Could not start voice recognition.');
-    }
-  };
+      setIsRecording(false);
+      setStatus('Processing voice...');
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
 
-  // ── Wake word mode ────────────────────────────────────────
-  const startWakeWord = async () => {
-    try {
-      const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (!granted) {
-        speak('Microphone permission denied.');
-        return;
-      }
-      setIsWakeMode(true);
-      wakeLoopRef.current = true;
-      speak('Wake word mode on. Say Hey Vision to activate.');
-      await startListeningOnce();
-    } catch (error) {
-      speak('Could not start wake word mode.');
-    }
-  };
+      // Read audio file as base64
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const reader = new FileReader();
 
-  const stopWakeWord = () => {
-    wakeLoopRef.current = false;
-    setIsWakeMode(false);
-    try { ExpoSpeechRecognitionModule.stop(); } catch {}
-    speak('Wake word mode off.');
+      reader.onloadend = async () => {
+        const base64Audio = reader.result.split(',')[1];
+        try {
+          const transcribeResponse = await axios.post(
+            `${SERVER_URL}/transcribe`,
+            { audio: base64Audio },
+            { timeout: 15000 }
+          );
+          const text = transcribeResponse.data.text;
+          if (text && text.trim()) {
+            handleVoiceCommand(text);
+          } else {
+            speak('Could not understand. Please try again.');
+          }
+        } catch (error) {
+          console.error('Transcribe error:', error);
+          speak('Voice recognition failed. Try again.');
+        }
+      };
+      reader.readAsDataURL(blob);
+
+    } catch (error) {
+      console.error('Stop recording error:', error);
+      setIsRecording(false);
+      speak('Recording failed. Try again.');
+    }
   };
 
   if (!permission) return <View style={styles.container} />;
@@ -277,12 +245,11 @@ export default function App() {
       {/* Status bar */}
       <View style={styles.statusBar}>
         <Text style={styles.connectionText}>
-          {isOnline ? '🟢 Online' : '🔴 Offline'}
-          {isWakeMode ? '  |  👂 Listening for "Hey Vision"' : ''}
+          {isOnline ? '🟢 Online — Full features' : '🔴 Offline — Detection only'}
         </Text>
         <Text style={styles.statusText} numberOfLines={3}>
           {isProcessing ? '⏳ Processing...' :
-           isListening  ? '🎤 Listening...' :
+           isRecording  ? '🎤 Listening... release to send' :
            autoDetect   ? '🔄 ' + status : status}
         </Text>
       </View>
@@ -349,31 +316,25 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* Row 4 — Voice */}
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[styles.btn, isListening ? styles.btnRed : styles.btnVoice]}
-            onPress={startManualListen}
-          >
-            <Text style={styles.btnIcon}>{isListening ? '⏹️' : '🎤'}</Text>
-            <Text style={styles.btnText}>{isListening ? 'Stop' : 'Voice Command'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btn, isWakeMode ? styles.btnRed : styles.btnWake]}
-            onPress={isWakeMode ? stopWakeWord : startWakeWord}
-          >
-            <Text style={styles.btnIcon}>{isWakeMode ? '🔇' : '👂'}</Text>
-            <Text style={styles.btnText}>{isWakeMode ? 'Stop Wake' : 'Hey Vision'}</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Voice button — hold to record */}
+        <TouchableOpacity
+          style={[styles.voiceBtn, isRecording && styles.voiceBtnActive]}
+          onPressIn={startRecording}
+          onPressOut={stopRecording}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.voiceIcon}>{isRecording ? '🔴' : '🎤'}</Text>
+          <Text style={styles.voiceText}>
+            {isRecording ? 'Release to Send' : 'Hold to Speak'}
+          </Text>
+        </TouchableOpacity>
 
-        {/* Stop */}
+        {/* Stop button */}
         <TouchableOpacity
           style={styles.stopBtn}
           onPress={() => {
             Speech.stop();
             stopAutoDetect();
-            stopWakeWord();
             setStatus('Stopped.');
             setIsProcessing(false);
           }}
@@ -410,10 +371,18 @@ const styles = StyleSheet.create({
   btnTeal:     { backgroundColor: '#009688' },
   btnDarkTeal: { backgroundColor: '#00695C' },
   btnRed:      { backgroundColor: '#F44336' },
-  btnVoice:    { backgroundColor: '#1565C0' },
-  btnWake:     { backgroundColor: '#6A1B9A' },
   btnIcon: { fontSize: 24, marginBottom: 4 },
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
+  voiceBtn: {
+    backgroundColor: '#1565C0',
+    padding: 18, borderRadius: 12,
+    alignItems: 'center', marginHorizontal: 5,
+    marginBottom: 10, flexDirection: 'row',
+    justifyContent: 'center'
+  },
+  voiceBtnActive: { backgroundColor: '#B71C1C' },
+  voiceIcon: { fontSize: 28, marginRight: 10 },
+  voiceText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   stopBtn: {
     backgroundColor: '#F44336', padding: 18, borderRadius: 12,
     alignItems: 'center', marginHorizontal: 5, marginTop: 5,
